@@ -6,7 +6,7 @@ export function route() {
   return { name: 'owner' };
 }
 
-export function navigate(path, { replace = false } = {}) {
-  history[replace ? 'replaceState' : 'pushState']({}, '', path);
+export function navigate(path, { replace = false, state = {} } = {}) {
+  history[replace ? 'replaceState' : 'pushState'](state, '', path);
   dispatchEvent(new PopStateEvent('popstate'));
 }

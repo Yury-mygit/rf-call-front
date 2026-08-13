@@ -7,6 +7,7 @@ import { navigate, route } from './router.js';
 
 const root = document.querySelector('#app');
 let guestSession = null;
+let guestEvents = null;
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 const errorText = (error) => ({ missing_auth_identity: 'Войдите через RaftForge, чтобы управлять комнатами.', token_not_found: 'Ссылка недействительна.', token_revoked: 'Ссылка отозвана.', room_closed: 'Комната закрыта.' })[error.message] || 'Не удалось выполнить запрос.';
 
@@ -27,6 +28,24 @@ async function copyIssuedLink(input, status) {
 
 function guestPath(token) { return `/j/${encodeURIComponent(token)}`; }
 
+function closeGuestEvents() {
+  guestEvents?.close();
+  guestEvents = null;
+}
+
+function watchGuestState(token) {
+  closeGuestEvents();
+  guestEvents = new EventSource(`/api/call/v1/join/${encodeURIComponent(token)}/events`);
+  guestEvents.addEventListener('state', (event) => {
+    const state = JSON.parse(event.data).state;
+    if (state === 'active') return;
+    closeGuestEvents();
+    guestSession.state = state === 'room_closed' ? 'ended' : 'unavailable';
+    history.replaceState({ guestReturn: true, displayName: guestSession.displayName }, '', guestPath(token));
+    guestView(token);
+  });
+}
+
 function shell(title, body, homePath = '/') {
   const brand = homePath ? `<a class="brand" href="${esc(homePath)}" data-link>CALL</a>` : '<span class="brand">CALL</span>';
   root.innerHTML = `<header>${brand}<span>${embedded ? 'RaftForge' : 'standalone'}</span></header><main><section class="hero"><p class="eyebrow">Защищённая видеосвязь</p><h1>${esc(title)}</h1></section>${body}</main><div id="audio-sink"></div>`;
@@ -34,6 +53,7 @@ function shell(title, body, homePath = '/') {
 }
 
 async function ownerView() {
+  closeGuestEvents();
   shell('Ваши комнаты', `<form id="create" class="panel row"><input name="name" required maxlength="200" placeholder="Название комнаты"><button>Создать</button></form><div id="notice"></div><div id="rooms" class="grid"><article class="panel">Загрузка…</article></div>`);
   const notice = root.querySelector('#notice');
   try {
@@ -81,7 +101,13 @@ async function ownerView() {
 }
 
 function guestView(token) {
-  if (!guestSession || guestSession.token !== token) guestSession = { token, displayName: '', state: 'ready' };
+  if (!guestSession || guestSession.token !== token) {
+    guestSession = {
+      token,
+      displayName: history.state?.displayName || '',
+      state: history.state?.guestReturn ? 'left' : 'ready',
+    };
+  }
   const path = guestPath(token);
   if (guestSession.state === 'ended') {
     shell('Конференция завершена', '<section class="panel empty"><p>Организатор закрыл комнату. Вернуться в этот звонок больше нельзя.</p></section>', path);
@@ -90,6 +116,11 @@ function guestView(token) {
   if (guestSession.state === 'unavailable') {
     shell('Ссылка недоступна', '<section class="panel empty"><p>Ссылка недействительна или была отозвана организатором.</p></section>', path);
     return;
+  }
+  if (guestSession.state === 'left' || guestSession.state === 'disconnected') {
+    watchGuestState(token);
+  } else {
+    closeGuestEvents();
   }
   const returnNotice = guestSession.state === 'left' ? '<p class="success" role="status">Вы вышли из звонка. Пока конференция продолжается, можно вернуться.</p>' : (guestSession.state === 'disconnected' ? '<p class="error" role="status">Связь прервалась. Попробуйте войти снова.</p>' : '');
   shell('Войти в комнату', `${returnNotice}<form id="guest" class="panel stack"><label>Как вас представить?<input name="displayName" required maxlength="200" autocomplete="name" autofocus value="${esc(guestSession.displayName)}"></label><button>${guestSession.state === 'ready' ? 'Продолжить' : 'Вернуться'}</button><p id="notice"></p></form>`, path);
@@ -100,6 +131,7 @@ function guestView(token) {
     button.disabled = true;
     guestSession.displayName = displayName;
     try {
+      closeGuestEvents();
       const descriptor = await api.guestJoin(token, displayName);
       guestSession.state = 'connected';
       await enterRoom(descriptor, true);
@@ -117,6 +149,7 @@ function guestView(token) {
 }
 
 async function enterRoom(descriptor, asGuest = false) {
+  closeGuestEvents();
   if (!asGuest) guestSession = null;
   await call.connect(descriptor);
   navigate(`/room/${descriptor.room_id}`);
@@ -128,7 +161,9 @@ async function leaveRoom() {
   await call.leave();
   if (returningGuest) {
     returningGuest.state = 'left';
-    navigate(guestPath(returningGuest.token));
+    navigate(guestPath(returningGuest.token), {
+      state: { guestReturn: true, displayName: returningGuest.displayName },
+    });
   } else {
     navigate('/');
   }
@@ -152,7 +187,10 @@ call.addEventListener('change', () => {
   if (route().name !== 'room') return;
   if (!call.room && guestSession) {
     guestSession.state = call.disconnectReason === DisconnectReason.ROOM_DELETED ? 'ended' : 'disconnected';
-    navigate(guestPath(guestSession.token), { replace: true });
+    navigate(guestPath(guestSession.token), {
+      replace: true,
+      state: { guestReturn: true, displayName: guestSession.displayName },
+    });
     return;
   }
   roomView();
