@@ -12,6 +12,8 @@ class CallController extends EventTarget {
   disconnectReason = null;
   diagnostics = null;
   diagnosticTimeline = [];
+  failedDescriptor = null;
+  icePolicy = 'relay';
 
   changed() { this.dispatchEvent(new Event('change')); }
 
@@ -21,11 +23,13 @@ class CallController extends EventTarget {
     this.changed();
   }
 
-  async connect(descriptor) {
+  async connect(descriptor, { icePolicy = 'relay' } = {}) {
     await this.leave();
     this.disconnectReason = null;
     this.diagnostics = null;
     this.diagnosticTimeline = [];
+    this.failedDescriptor = null;
+    this.icePolicy = icePolicy;
     this.descriptor = descriptor;
     this.room = new Room({ adaptiveStream: true, dynacast: true });
     const connectingRoom = this.room;
@@ -58,11 +62,12 @@ class CallController extends EventTarget {
         // Mobile/provider NATs observed during CL-6 smoke repeatedly broke the
         // direct UDP path and forced full LiveKit reconnects. CALL is a small
         // deployment, so prefer a stable coturn relay over direct-path savings.
-        rtcConfig: { iceServers, iceTransportPolicy: 'relay' },
+        rtcConfig: { iceServers, iceTransportPolicy: icePolicy },
       });
     } catch (error) {
       this.recordDiagnostic(`connect:error:${error?.name || 'Error'}`);
       this.diagnostics = await this.buildDiagnostics(error, iceServers, connectingRoom);
+      this.failedDescriptor = descriptor;
       throw error;
     }
     this.startedAt = Date.now();
@@ -167,7 +172,7 @@ class CallController extends EventTarget {
       kind: 'call-ice-diagnostic-v1',
       browser: navigator.userAgent.replace(/\([^)]*\)/g, '(platform)'),
       error: { name: error?.name || 'Error', message: String(error?.message || error).slice(0, 240) },
-      policy: 'relay',
+      policy: this.icePolicy,
       iceServers: iceServers.flatMap((server) => server.urls).map((url) => {
         const value = String(url).toLowerCase();
         return {

@@ -13,13 +13,15 @@ const errorText = (error) => ({ missing_auth_identity: 'Войдите чере�
 
 function diagnosticMarkup() {
   if (!call.diagnostics) return '';
-  return '<button type="button" class="secondary" data-copy-diagnostics>Скопировать диагностику</button><small data-diagnostic-status>Отчёт не содержит токенов, IP-адресов или SDP.</small>';
+  const firefoxRetry = /Firefox\//.test(navigator.userAgent) && call.icePolicy === 'relay' && call.failedDescriptor
+    ? '<button type="button" data-direct-retry>Повторить с прямым соединением</button>'
+    : '';
+  return `<span class="diagnostic-actions"><button type="button" class="secondary" data-copy-diagnostics>Скопировать диагностику</button>${firefoxRetry}</span><small data-diagnostic-status>Отчёт не содержит токенов, IP-адресов или SDP.</small>`;
 }
 
-function wireDiagnosticCopy(container) {
+function wireDiagnostics(container) {
   const button = container.querySelector('[data-copy-diagnostics]');
-  if (!button) return;
-  button.onclick = async () => {
+  if (button) button.onclick = async () => {
     const status = container.querySelector('[data-diagnostic-status]');
     try {
       await navigator.clipboard.writeText(call.diagnostics);
@@ -27,6 +29,20 @@ function wireDiagnosticCopy(container) {
     } catch {
       status.textContent = 'Копирование заблокировано. Откройте консоль: CALL ICE DIAGNOSTIC.';
       console.info('CALL ICE DIAGNOSTIC', call.diagnostics);
+    }
+  };
+  const retry = container.querySelector('[data-direct-retry]');
+  if (retry) retry.onclick = async () => {
+    const descriptor = call.failedDescriptor;
+    const status = container.querySelector('[data-diagnostic-status]');
+    retry.disabled = true;
+    status.textContent = 'Проверяем прямое ICE-соединение…';
+    try {
+      await call.connect(descriptor, { icePolicy: 'all' });
+      navigate(`/room/${descriptor.room_id}`);
+    } catch (error) {
+      container.innerHTML = `<span>${esc(errorText(error))}</span>${diagnosticMarkup()}`;
+      wireDiagnostics(container);
     }
   };
 }
@@ -163,7 +179,7 @@ function guestView(token) {
       }
       root.querySelector('#notice').className = 'error';
       root.querySelector('#notice').innerHTML = `<span>${esc(errorText(error))}</span>${diagnosticMarkup()}`;
-      wireDiagnosticCopy(root.querySelector('#notice'));
+      wireDiagnostics(root.querySelector('#notice'));
       button.disabled = false;
     }
   };

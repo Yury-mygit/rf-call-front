@@ -21,6 +21,7 @@ h1 { margin: .25rem 0; font-size: clamp(2rem, 6vw, 4.5rem); line-height: 1; } h2
 .status { display: inline-block; color: #9db0d0; font-size: .8rem; text-transform: uppercase; }
 .empty { color: #aab5ca; text-align: center; }.error { color: #ff939d; }.success { margin: 1rem 0; padding: 1rem; border-radius: 14px; background: #163d35; display: grid; gap: .65rem; }
 .copy-row { display: grid; grid-template-columns: 1fr auto; gap: .65rem; }
+.diagnostic-actions { display: flex; gap: .65rem; flex-wrap: wrap; margin-top: .75rem; }
 .call-shell { display: grid; gap: 1rem; }.stage { min-height: min(65vh, 700px); border: 1px solid #293149; border-radius: 20px; background: #03050a; display: grid; place-items: center; overflow: hidden; }.stage video { width: 100%; height: 100%; object-fit: contain; }.empty-stage { color: #606d87; }.controls { display: flex; justify-content: center; gap: .65rem; flex-wrap: wrap; }
 #audio-sink { display: none; }
 @media (max-width: 680px) { main { padding-top: 2rem; }.row, .copy-row { grid-template-columns: 1fr; }.room { align-items: stretch; flex-direction: column; }.actions button { flex: 1; }.stage { min-height: 50vh; } }
