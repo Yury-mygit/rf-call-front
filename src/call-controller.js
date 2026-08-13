@@ -48,6 +48,9 @@ class CallController extends EventTarget {
     this.room.on(RoomEvent.LocalTrackUnpublished, () => this.changed());
     this.room.on(RoomEvent.TrackMuted, () => this.changed());
     this.room.on(RoomEvent.TrackUnmuted, () => this.changed());
+    this.room.on(RoomEvent.ParticipantConnected, () => this.changed());
+    this.room.on(RoomEvent.ParticipantDisconnected, () => this.changed());
+    this.room.on(RoomEvent.ParticipantNameChanged, () => this.changed());
     this.room.on(RoomEvent.Reconnecting, () => this.setStatus('Восстанавливаем связь…'));
     this.room.on(RoomEvent.Reconnected, () => this.setStatus('Связь восстановлена.'));
     this.room.on(RoomEvent.MediaDevicesError, (error) => this.setStatus('', this.deviceError(error)));
@@ -130,6 +133,15 @@ class CallController extends EventTarget {
   }
 
   async startAudio() { await this.room?.startAudio(); }
+
+  participants() {
+    if (!this.room) return [];
+    const local = this.room.localParticipant;
+    const remote = [...this.room.remoteParticipants.values()]
+      .map((participant) => ({ name: participant.name?.trim() || 'Участник', local: false }))
+      .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+    return [{ name: local.name?.trim() || 'Вы', local: true }, ...remote];
+  }
 
   recordDiagnostic(event) {
     this.diagnosticTimeline.push({ ms: performance.now(), event });
