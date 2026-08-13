@@ -10,6 +10,8 @@ class CallController extends EventTarget {
   status = '';
   error = '';
   disconnectReason = null;
+  diagnostics = null;
+  diagnosticTimeline = [];
 
   changed() { this.dispatchEvent(new Event('change')); }
 
@@ -22,8 +24,17 @@ class CallController extends EventTarget {
   async connect(descriptor) {
     await this.leave();
     this.disconnectReason = null;
+    this.diagnostics = null;
+    this.diagnosticTimeline = [];
     this.descriptor = descriptor;
     this.room = new Room({ adaptiveStream: true, dynacast: true });
+    const connectingRoom = this.room;
+    this.recordDiagnostic('connect:start');
+    this.room.on(RoomEvent.SignalConnected, () => {
+      this.recordDiagnostic('signal:connected');
+      queueMicrotask(() => this.watchIceErrors());
+    });
+    this.room.on(RoomEvent.ConnectionStateChanged, (state) => this.recordDiagnostic(`room:${state}`));
     this.room.on(RoomEvent.TrackSubscribed, (track) => {
       this.changed();
       this.attach(track);
@@ -42,12 +53,18 @@ class CallController extends EventTarget {
       ...(server.username ? { username: server.username } : {}),
       ...(server.credential ? { credential: server.credential } : {}),
     }));
-    await this.room.connect(descriptor.media_endpoint, descriptor.media_token, {
-      // Mobile/provider NATs observed during CL-6 smoke repeatedly broke the
-      // direct UDP path and forced full LiveKit reconnects. CALL is a small
-      // deployment, so prefer a stable coturn relay over direct-path savings.
-      rtcConfig: { iceServers, iceTransportPolicy: 'relay' },
-    });
+    try {
+      await this.room.connect(descriptor.media_endpoint, descriptor.media_token, {
+        // Mobile/provider NATs observed during CL-6 smoke repeatedly broke the
+        // direct UDP path and forced full LiveKit reconnects. CALL is a small
+        // deployment, so prefer a stable coturn relay over direct-path savings.
+        rtcConfig: { iceServers, iceTransportPolicy: 'relay' },
+      });
+    } catch (error) {
+      this.recordDiagnostic(`connect:error:${error?.name || 'Error'}`);
+      this.diagnostics = await this.buildDiagnostics(error, iceServers, connectingRoom);
+      throw error;
+    }
     this.startedAt = Date.now();
     this.timer = setInterval(() => this.publishPill(), 1000);
     this.publishPill();
@@ -108,6 +125,61 @@ class CallController extends EventTarget {
   }
 
   async startAudio() { await this.room?.startAudio(); }
+
+  recordDiagnostic(event) {
+    this.diagnosticTimeline.push({ ms: performance.now(), event });
+  }
+
+  watchIceErrors() {
+    const manager = this.room?.engine?.pcManager;
+    for (const [target, transport] of [['publisher', manager?.publisher], ['subscriber', manager?.subscriber]]) {
+      if (!transport) continue;
+      transport.onIceCandidateError = (event) => {
+        this.recordDiagnostic(`ice-error:${target}:${event.errorCode || 'unknown'}:${event.errorText || ''}`);
+      };
+    }
+  }
+
+  async buildDiagnostics(error, iceServers, diagnosticRoom = this.room) {
+    const candidates = {};
+    const transports = {};
+    const manager = diagnosticRoom?.engine?.pcManager;
+    for (const [target, transport] of [['publisher', manager?.publisher], ['subscriber', manager?.subscriber]]) {
+      if (!transport) continue;
+      transports[target] = {
+        connection: transport.getConnectionState(),
+        ice: transport.getICEConnectionState(),
+        signaling: transport.getSignallingState(),
+      };
+      try {
+        const stats = await transport.getStats();
+        stats.forEach((stat) => {
+          if (stat.type !== 'local-candidate' && stat.type !== 'remote-candidate') return;
+          const key = [stat.type, stat.candidateType || 'unknown', stat.protocol || 'unknown', stat.relayProtocol || 'none'].join('/');
+          candidates[key] = (candidates[key] || 0) + 1;
+        });
+      } catch {
+        candidates[`${target}/stats-unavailable`] = 1;
+      }
+    }
+    const started = this.diagnosticTimeline[0]?.ms || performance.now();
+    return JSON.stringify({
+      kind: 'call-ice-diagnostic-v1',
+      browser: navigator.userAgent.replace(/\([^)]*\)/g, '(platform)'),
+      error: { name: error?.name || 'Error', message: String(error?.message || error).slice(0, 240) },
+      policy: 'relay',
+      iceServers: iceServers.flatMap((server) => server.urls).map((url) => {
+        const value = String(url).toLowerCase();
+        return {
+          scheme: value.split(':', 1)[0] || 'unknown',
+          transport: value.includes('transport=tcp') ? 'tcp' : (value.includes('transport=udp') ? 'udp' : 'default'),
+        };
+      }),
+      timeline: this.diagnosticTimeline.map(({ ms, event }) => ({ after_ms: Math.round(ms - started), event })),
+      transports,
+      candidates,
+    }, null, 2);
+  }
 
   async leave() {
     if (this.room) await this.room.disconnect(true);

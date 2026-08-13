@@ -11,6 +11,26 @@ let guestEvents = null;
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 const errorText = (error) => ({ missing_auth_identity: 'Войдите через RaftForge, чтобы управлять комнатами.', token_not_found: 'Ссылка недействительна.', token_revoked: 'Ссылка отозвана.', room_closed: 'Комната закрыта.' })[error.message] || 'Не удалось выполнить запрос.';
 
+function diagnosticMarkup() {
+  if (!call.diagnostics) return '';
+  return '<button type="button" class="secondary" data-copy-diagnostics>Скопировать диагностику</button><small data-diagnostic-status>Отчёт не содержит токенов, IP-адресов или SDP.</small>';
+}
+
+function wireDiagnosticCopy(container) {
+  const button = container.querySelector('[data-copy-diagnostics]');
+  if (!button) return;
+  button.onclick = async () => {
+    const status = container.querySelector('[data-diagnostic-status]');
+    try {
+      await navigator.clipboard.writeText(call.diagnostics);
+      status.textContent = 'Диагностика скопирована.';
+    } catch {
+      status.textContent = 'Копирование заблокировано. Откройте консоль: CALL ICE DIAGNOSTIC.';
+      console.info('CALL ICE DIAGNOSTIC', call.diagnostics);
+    }
+  };
+}
+
 async function copyIssuedLink(input, status) {
   input.focus();
   input.select();
@@ -142,7 +162,8 @@ function guestView(token) {
         return;
       }
       root.querySelector('#notice').className = 'error';
-      root.querySelector('#notice').textContent = errorText(error);
+      root.querySelector('#notice').innerHTML = `<span>${esc(errorText(error))}</span>${diagnosticMarkup()}`;
+      wireDiagnosticCopy(root.querySelector('#notice'));
       button.disabled = false;
     }
   };
