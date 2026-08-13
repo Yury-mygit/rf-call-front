@@ -1,4 +1,4 @@
-import { Room, RoomEvent, Track } from 'livekit-client';
+import { DisconnectReason, Room, RoomEvent, Track } from 'livekit-client';
 import { emit } from './bridge.js';
 
 class CallController extends EventTarget {
@@ -9,6 +9,7 @@ class CallController extends EventTarget {
   pending = { mic: false, screen: false };
   status = '';
   error = '';
+  disconnectReason = null;
 
   changed() { this.dispatchEvent(new Event('change')); }
 
@@ -20,6 +21,7 @@ class CallController extends EventTarget {
 
   async connect(descriptor) {
     await this.leave();
+    this.disconnectReason = null;
     this.descriptor = descriptor;
     this.room = new Room({ adaptiveStream: true, dynacast: true });
     this.room.on(RoomEvent.TrackSubscribed, (track) => {
@@ -34,7 +36,7 @@ class CallController extends EventTarget {
     this.room.on(RoomEvent.Reconnecting, () => this.setStatus('Восстанавливаем связь…'));
     this.room.on(RoomEvent.Reconnected, () => this.setStatus('Связь восстановлена.'));
     this.room.on(RoomEvent.MediaDevicesError, (error) => this.setStatus('', this.deviceError(error)));
-    this.room.on(RoomEvent.Disconnected, () => this.finish());
+    this.room.on(RoomEvent.Disconnected, (reason) => this.finish(reason));
     const iceServers = descriptor.media_config.ice_servers.map((server) => ({
       urls: server.urls,
       ...(server.username ? { username: server.username } : {}),
@@ -109,12 +111,13 @@ class CallController extends EventTarget {
 
   async leave() {
     if (this.room) await this.room.disconnect(true);
-    this.finish();
+    this.finish(DisconnectReason.CLIENT_INITIATED);
   }
 
-  finish() {
+  finish(reason) {
     clearInterval(this.timer);
     this.timer = null;
+    if (reason !== undefined) this.disconnectReason = reason;
     this.room = null;
     this.descriptor = null;
     this.pending = { mic: false, screen: false };
