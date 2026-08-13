@@ -14,6 +14,7 @@ class CallController extends EventTarget {
   diagnosticTimeline = [];
   failedDescriptor = null;
   icePolicy = 'relay';
+  outputMuted = false;
 
   changed() { this.dispatchEvent(new Event('change')); }
 
@@ -51,6 +52,7 @@ class CallController extends EventTarget {
     this.room.on(RoomEvent.ParticipantConnected, () => this.changed());
     this.room.on(RoomEvent.ParticipantDisconnected, () => this.changed());
     this.room.on(RoomEvent.ParticipantNameChanged, () => this.changed());
+    this.room.on(RoomEvent.AudioPlaybackStatusChanged, () => this.changed());
     this.room.on(RoomEvent.Reconnecting, () => this.setStatus('Восстанавливаем связь…'));
     this.room.on(RoomEvent.Reconnected, () => this.setStatus('Связь восстановлена.'));
     this.room.on(RoomEvent.MediaDevicesError, (error) => this.setStatus('', this.deviceError(error)));
@@ -85,6 +87,7 @@ class CallController extends EventTarget {
     const element = track.attach();
     element.autoplay = true;
     element.playsInline = true;
+    if (track.kind === Track.Kind.Audio) element.muted = this.outputMuted;
     target.append(element);
   }
 
@@ -132,7 +135,19 @@ class CallController extends EventTarget {
     }
   }
 
-  async startAudio() { await this.room?.startAudio(); }
+  async toggleAudio() {
+    if (!this.room) return;
+    if (this.outputMuted || !this.room.canPlaybackAudio) {
+      await this.room.startAudio();
+      this.outputMuted = false;
+    } else {
+      this.outputMuted = true;
+    }
+    document.querySelectorAll('#audio-sink audio').forEach((element) => {
+      element.muted = this.outputMuted;
+    });
+    this.changed();
+  }
 
   participants() {
     if (!this.room) return [];
@@ -210,6 +225,7 @@ class CallController extends EventTarget {
     this.room = null;
     this.descriptor = null;
     this.pending = { mic: false, screen: false };
+    this.outputMuted = false;
     this.status = '';
     this.error = '';
     document.querySelectorAll('#audio-sink audio, #stage-media video').forEach((el) => el.remove());
