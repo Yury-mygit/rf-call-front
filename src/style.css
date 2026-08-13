@@ -42,8 +42,13 @@ h1 { margin: .25rem 0; font-size: clamp(2rem, 6vw, 4.5rem); line-height: 1; } h2
 .call-main .control-button { width: 44px; height: 44px; padding: 11px; border-radius: 50%; background: #29334a; color: #eef2ff; display: grid; place-items: center; }
 .call-main .control-button:hover, .call-main .control-button.active { background: #8da2fb; color: #091022; }
 .call-main .control-button.danger { background: #ef6a77; color: #22090d; }
+.room-actions { position: absolute; z-index: 3; right: 1rem; bottom: 1rem; display: flex; gap: .5rem; padding: .45rem; border: 1px solid #35405a; border-radius: 999px; background: rgba(17, 23, 37, .88); box-shadow: 0 14px 40px #0009; backdrop-filter: blur(14px); }
+.room-action-status { position: absolute; z-index: 4; right: 1rem; bottom: 5.25rem; max-width: min(360px, calc(100% - 2rem)); padding: .5rem .7rem; border-radius: 10px; background: rgba(17, 23, 37, .94); color: #cbd5e8; font-size: .78rem; box-shadow: 0 10px 30px #0008; }
+.room-action-status:empty { display: none; }
+.room-action-status span { display: block; margin-bottom: .4rem; }
+.room-link-fallback { padding: .45rem .55rem; font-size: .72rem; }
 .control-button svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .control-button svg rect { fill: none; }
 .control-button svg path:first-child { fill: none; }
 #audio-sink { display: none; }
-@media (max-width: 680px) { main { padding-top: 2rem; }.call-main { padding-top: .75rem; }.row, .copy-row { grid-template-columns: 1fr; }.room { align-items: stretch; flex-direction: column; }.actions button { flex: 1; }.room-label { top: auto; bottom: .75rem; left: .75rem; }.participants-panel { top: .75rem; right: .75rem; left: .75rem; width: auto; max-height: none; padding: .65rem; }.participant-list { display: flex; max-height: none; overflow-x: auto; overflow-y: hidden; }.participant-card { flex: 0 0 auto; max-width: min(70vw, 220px); }.participants-heading { padding: 0 .15rem; } }
+@media (max-width: 680px) { main { padding-top: 2rem; }.call-main { padding-top: .75rem; }.row, .copy-row { grid-template-columns: 1fr; }.room { align-items: stretch; flex-direction: column; }.actions button { flex: 1; }.room-label { top: auto; bottom: .75rem; left: .75rem; }.participants-panel { top: .75rem; right: .75rem; left: .75rem; width: auto; max-height: none; padding: .65rem; }.participant-list { display: flex; max-height: none; overflow-x: auto; overflow-y: hidden; }.participant-card { flex: 0 0 auto; max-width: min(70vw, 220px); }.participants-heading { padding: 0 .15rem; }.call-main .controls { bottom: calc(5rem + env(safe-area-inset-bottom)); }.room-actions { right: max(.75rem, env(safe-area-inset-right)); bottom: max(.75rem, env(safe-area-inset-bottom)); }.room-action-status { right: max(.75rem, env(safe-area-inset-right)); bottom: calc(5rem + env(safe-area-inset-bottom)); } }

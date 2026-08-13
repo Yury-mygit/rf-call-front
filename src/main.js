@@ -16,6 +16,7 @@ const icon = (name) => ({
   micOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9v2a3 3 0 0 0 5.1 2.1M15 9V6a3 3 0 0 0-5.6-1.5M5 11a7 7 0 0 0 11.7 5.2M19 11a7 7 0 0 1-.4 2.3M12 18v3M9 21h6M3 3l18 18"/></svg>',
   screen: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M9 11l3-3 3 3M12 8v6"/></svg>',
   screenOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M9 8h6v5H9z"/></svg>',
+  link: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"/></svg>',
   leave: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15.5a11 11 0 0 1 14 0M7.5 14l-2 4M16.5 14l2 4"/></svg>',
 })[name];
 const errorText = (error) => ({ missing_auth_identity: 'Войдите через RaftForge, чтобы управлять комнатами.', token_not_found: 'Ссылка недействительна.', token_revoked: 'Ссылка отозвана.', room_closed: 'Комната закрыта.' })[error.message] || 'Не удалось выполнить запрос.';
@@ -68,6 +69,26 @@ async function copyIssuedLink(input, status) {
     status.textContent = 'Скопировано.';
   } catch {
     status.textContent = 'Копирование заблокировано браузером — ссылка выделена, нажмите Ctrl/Cmd+C.';
+  }
+}
+
+async function copyRoomLink(button, status) {
+  button.disabled = true;
+  status.textContent = 'Готовим ссылку…';
+  try {
+    let url;
+    if (guestSession) {
+      url = `${location.origin}${guestPath(guestSession.token)}`;
+    } else {
+      const token = await api.issueToken(call.descriptor.room_id, { can_publish_audio: true, can_publish_video: false, can_share_screen: true });
+      url = `${location.origin}/j/${token.token}`;
+    }
+    status.innerHTML = `<input class="room-link-fallback" aria-label="Ссылка на комнату" readonly value="${esc(url)}"><small data-room-copy-status>Можно скопировать вручную.</small>`;
+    await copyIssuedLink(status.querySelector('input'), status.querySelector('[data-room-copy-status]'));
+  } catch {
+    status.textContent = 'Не удалось создать ссылку. Попробуйте ещё раз.';
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -226,15 +247,17 @@ function roomView() {
   const audioLabel = audioEnabled ? 'Выключить звук собеседников' : 'Включить звук собеседников';
   const micLabel = participant.isMicrophoneEnabled ? 'Выключить микрофон' : 'Включить микрофон';
   const screenLabel = participant.isScreenShareEnabled ? 'Остановить демонстрацию' : 'Показать экран';
-  const controls = `<div class="controls" aria-label="Управление звонком"><button type="button" id="audio" class="control-button${audioEnabled ? ' active' : ''}" aria-label="${audioLabel}" title="${audioLabel}" aria-pressed="${audioEnabled}">${icon(audioEnabled ? 'audio' : 'audioOff')}</button><button type="button" id="mic" class="control-button${participant.isMicrophoneEnabled ? ' active' : ''}" aria-label="${micLabel}" title="${micLabel}" aria-pressed="${participant.isMicrophoneEnabled}" ${!call.descriptor.capabilities.can_publish_audio || call.pending.mic ? 'disabled' : ''}>${icon(participant.isMicrophoneEnabled ? 'mic' : 'micOff')}</button><button type="button" id="screen" class="control-button${participant.isScreenShareEnabled ? ' active' : ''}" aria-label="${screenLabel}" title="${screenLabel}" aria-pressed="${participant.isScreenShareEnabled}" ${!call.descriptor.capabilities.can_share_screen || call.pending.screen ? 'disabled' : ''}>${icon(participant.isScreenShareEnabled ? 'screenOff' : 'screen')}</button><button type="button" id="leave" class="control-button danger" aria-label="Выйти из звонка" title="Выйти из звонка">${icon('leave')}</button></div>`;
+  const controls = `<div class="controls" aria-label="Управление звонком"><button type="button" id="audio" class="control-button${audioEnabled ? ' active' : ''}" aria-label="${audioLabel}" title="${audioLabel}" aria-pressed="${audioEnabled}">${icon(audioEnabled ? 'audio' : 'audioOff')}</button><button type="button" id="mic" class="control-button${participant.isMicrophoneEnabled ? ' active' : ''}" aria-label="${micLabel}" title="${micLabel}" aria-pressed="${participant.isMicrophoneEnabled}" ${!call.descriptor.capabilities.can_publish_audio || call.pending.mic ? 'disabled' : ''}>${icon(participant.isMicrophoneEnabled ? 'mic' : 'micOff')}</button><button type="button" id="screen" class="control-button${participant.isScreenShareEnabled ? ' active' : ''}" aria-label="${screenLabel}" title="${screenLabel}" aria-pressed="${participant.isScreenShareEnabled}" ${!call.descriptor.capabilities.can_share_screen || call.pending.screen ? 'disabled' : ''}>${icon(participant.isScreenShareEnabled ? 'screenOff' : 'screen')}</button></div>`;
+  const roomActions = `<div class="room-actions" aria-label="Действия комнаты"><button type="button" id="room-link" class="control-button" aria-label="Скопировать ссылку на комнату" title="Скопировать ссылку на комнату">${icon('link')}</button><button type="button" id="leave" class="control-button danger" aria-label="Выйти из звонка" title="Выйти из звонка">${icon('leave')}</button></div><div class="room-action-status" role="status" aria-live="polite"></div>`;
   const mediaNotice = call.error ? `<p class="error" role="alert">${esc(call.error)}</p>` : (call.status ? `<p class="success" role="status">${esc(call.status)}</p>` : '');
-  shell(call.descriptor.room_human_id, `<section class="call-shell"><div class="stage-wrap"><div id="stage-media" class="stage"><div class="empty-stage">Экран собеседника появится здесь</div></div>${roomLabel}${participantPanel}${controls}</div>${mediaNotice}</section>`, null);
+  shell(call.descriptor.room_human_id, `<section class="call-shell"><div class="stage-wrap"><div id="stage-media" class="stage"><div class="empty-stage">Экран собеседника появится здесь</div></div>${roomLabel}${participantPanel}${controls}${roomActions}</div>${mediaNotice}</section>`, null);
   root.querySelector('header').remove();
   root.querySelector('.hero').remove();
   root.querySelector('main').classList.add('call-main');
   root.querySelector('#audio').onclick = async () => call.toggleAudio();
   root.querySelector('#mic').onclick = async () => call.toggleMic();
   root.querySelector('#screen').onclick = async () => call.toggleScreen();
+  root.querySelector('#room-link').onclick = (event) => copyRoomLink(event.currentTarget, root.querySelector('.room-action-status'));
   root.querySelector('#leave').onclick = leaveRoom;
   queueMicrotask(() => call.mountMedia());
 }
