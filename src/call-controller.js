@@ -1,5 +1,6 @@
 import { DisconnectReason, Room, RoomEvent, Track } from 'livekit-client';
 import { emit } from './bridge.js';
+import { api } from './api.js';
 
 class CallController extends EventTarget {
   room = null;
@@ -15,6 +16,8 @@ class CallController extends EventTarget {
   failedDescriptor = null;
   icePolicy = 'relay';
   outputMuted = false;
+  screenClosing = false;
+  screenCloseTimer = null;
 
   changed() { this.dispatchEvent(new Event('change')); }
 
@@ -44,9 +47,26 @@ class CallController extends EventTarget {
       this.changed();
       this.attach(track);
     });
-    this.room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
-    this.room.on(RoomEvent.LocalTrackPublished, () => this.changed());
-    this.room.on(RoomEvent.LocalTrackUnpublished, () => this.changed());
+    this.room.on(RoomEvent.TrackUnsubscribed, (track) => {
+      track.detach().forEach((el) => el.remove());
+      if (track.source === Track.Source.ScreenShare) this.beginScreenClose();
+      else this.changed();
+    });
+    this.room.on(RoomEvent.LocalTrackPublished, (publication) => {
+      if (publication.source === Track.Source.ScreenShare) {
+        this.status = '';
+        this.error = '';
+      }
+      this.changed();
+    });
+    this.room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
+      if (publication.source === Track.Source.ScreenShare) {
+        this.releaseScreenClaim();
+        this.beginScreenClose();
+      } else {
+        this.changed();
+      }
+    });
     this.room.on(RoomEvent.TrackMuted, () => this.changed());
     this.room.on(RoomEvent.TrackUnmuted, () => this.changed());
     this.room.on(RoomEvent.ParticipantConnected, () => this.changed());
@@ -88,6 +108,12 @@ class CallController extends EventTarget {
     element.autoplay = true;
     element.playsInline = true;
     if (track.kind === Track.Kind.Audio) element.muted = this.outputMuted;
+    if (track.kind === Track.Kind.Video) {
+      element.addEventListener('loadedmetadata', () => {
+        if (!element.videoWidth || !element.videoHeight) return;
+        target.style.setProperty('--share-ratio', String(element.videoWidth / element.videoHeight));
+      });
+    }
     target.append(element);
   }
 
@@ -96,8 +122,13 @@ class CallController extends EventTarget {
     // Never attach local microphone tracks to the local audio sink. Doing so
     // creates self-monitoring and, with speakers enabled, an acoustic echo
     // loop. The stage/audio sink only renders subscribed remote media.
-    const publications = [...this.room.remoteParticipants.values()]
-      .flatMap((participant) => [...participant.trackPublications.values()]);
+    const localScreen = [...this.room.localParticipant.trackPublications.values()]
+      .filter((publication) => publication.source === Track.Source.ScreenShare);
+    const publications = [
+      ...localScreen,
+      ...[...this.room.remoteParticipants.values()]
+        .flatMap((participant) => [...participant.trackPublications.values()]),
+    ];
     publications.forEach((publication) => {
       const track = publication.track;
       if (!track) return;
@@ -123,12 +154,28 @@ class CallController extends EventTarget {
 
   async toggleScreen() {
     if (!this.room || !this.descriptor?.capabilities.can_share_screen || this.pending.screen) return;
+    const enabling = !this.room.localParticipant.isScreenShareEnabled;
     this.pending.screen = true;
     this.setStatus('');
     try {
-      await this.room.localParticipant.setScreenShareEnabled(!this.room.localParticipant.isScreenShareEnabled);
+      if (enabling) {
+        await api.setScreenShare(this.descriptor.room_id, this.descriptor.control_token, true);
+      }
+      await this.room.localParticipant.setScreenShareEnabled(enabling);
+      if (!enabling) {
+        await api.setScreenShare(this.descriptor.room_id, this.descriptor.control_token, false);
+      }
     } catch (error) {
-      this.setStatus('', this.deviceError(error));
+      const publishedDespiteError = enabling && this.room?.localParticipant.isScreenShareEnabled;
+      if (enabling && !publishedDespiteError) {
+        await api.setScreenShare(this.descriptor.room_id, this.descriptor.control_token, false).catch(() => {});
+      }
+      if (publishedDespiteError) {
+        this.setStatus('');
+      } else {
+        console.warn('CALL media operation failed', { name: error?.name, message: error?.message });
+        this.setStatus('', error?.message === 'screen_share_busy' ? 'Другой участник уже показывает экран.' : this.deviceError(error));
+      }
     } finally {
       this.pending.screen = false;
       this.changed();
@@ -156,6 +203,39 @@ class CallController extends EventTarget {
       .map((participant) => ({ name: participant.name?.trim() || 'Участник', local: false }))
       .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
     return [{ name: local.name?.trim() || 'Вы', local: true }, ...remote];
+  }
+
+  screenShare() {
+    if (!this.room) return null;
+    const local = [...this.room.localParticipant.trackPublications.values()]
+      .find((publication) => publication.source === Track.Source.ScreenShare && publication.track);
+    if (local) return { publication: local, local: true };
+    for (const participant of this.room.remoteParticipants.values()) {
+      const publication = [...participant.trackPublications.values()]
+        .find((item) => item.source === Track.Source.ScreenShare && item.track);
+      if (publication) return { publication, local: false };
+    }
+    return null;
+  }
+
+  async releaseScreenClaim() {
+    if (!this.descriptor) return;
+    await api.setScreenShare(
+      this.descriptor.room_id,
+      this.descriptor.control_token,
+      false,
+    ).catch(() => {});
+  }
+
+  beginScreenClose() {
+    clearTimeout(this.screenCloseTimer);
+    this.screenClosing = true;
+    this.changed();
+    this.screenCloseTimer = setTimeout(() => {
+      this.screenClosing = false;
+      this.screenCloseTimer = null;
+      this.changed();
+    }, 420);
   }
 
   recordDiagnostic(event) {
@@ -214,18 +294,24 @@ class CallController extends EventTarget {
   }
 
   async leave() {
+    if (this.room?.localParticipant.isScreenShareEnabled && this.descriptor) {
+      await this.releaseScreenClaim();
+    }
     if (this.room) await this.room.disconnect(true);
     this.finish(DisconnectReason.CLIENT_INITIATED);
   }
 
   finish(reason) {
     clearInterval(this.timer);
+    clearTimeout(this.screenCloseTimer);
     this.timer = null;
     if (reason !== undefined) this.disconnectReason = reason;
     this.room = null;
     this.descriptor = null;
     this.pending = { mic: false, screen: false };
     this.outputMuted = false;
+    this.screenClosing = false;
+    this.screenCloseTimer = null;
     this.status = '';
     this.error = '';
     document.querySelectorAll('#audio-sink audio, #stage-media video').forEach((el) => el.remove());
@@ -236,7 +322,11 @@ class CallController extends EventTarget {
   deviceError(error) {
     if (error?.name === 'NotAllowedError') return 'Браузер не дал доступ к микрофону или экрану.';
     if (error?.name === 'NotFoundError') return 'Медиаустройство не найдено.';
-    return 'Не удалось изменить состояние медиа. Проверьте разрешения браузера.';
+    if (error?.name === 'AbortError') return 'Выбор экрана был отменён или прерван браузером.';
+    if (error?.name === 'InvalidStateError') return 'Браузер не разрешил демонстрацию из текущей вкладки. Активируйте окно и повторите.';
+    if (error?.name === 'NotReadableError') return 'Выбранный экран недоступен для захвата. Закройте другое приложение захвата и повторите.';
+    const detail = error?.name || error?.message;
+    return detail ? `Не удалось включить медиа (${String(detail).slice(0, 80)}).` : 'Не удалось изменить состояние медиа. Проверьте разрешения браузера.';
   }
 
   publishPill() {

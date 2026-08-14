@@ -15,4 +15,5 @@ export const api = {
   issueToken: (id, capabilities) => request(`/api/call/v1/rooms/${id}/tokens`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(capabilities) }),
   ownerJoin: (id) => request(`/api/call/v1/rooms/${id}/join`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ client_kind: 'web' }) }),
   guestJoin: (token, displayName) => request(`/api/call/v1/join/${encodeURIComponent(token)}`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ display_name: displayName, client_kind: 'web' }) }),
+  setScreenShare: (id, mediaToken, active) => request(`/api/call/v1/rooms/${id}/screen-share`, { method: 'PUT', headers: { ...jsonHeaders, Authorization: `Bearer ${mediaToken}` }, body: JSON.stringify({ active }) }),
 };

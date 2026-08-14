@@ -30,6 +30,20 @@ renegotiation.
 CL-6 Stage 2.9 remains open until the repeat Chrome/Firefox/Safari and mobile
 viewport smoke is complete.
 
+## Exclusive screen share (CL-15)
+
+- Media stage is hidden until a screen-share track exists; room label,
+  participant cards and controls remain available.
+- Stage opens and closes with a CRT-style transition and respects
+  `prefers-reduced-motion`.
+- The stage follows the captured track's actual video aspect ratio, including
+  portrait phone screens, without stretching.
+- A backend atomic claim permits one screen publisher at a time. Other clients
+  disable their share button until stop, leave or disconnect releases it.
+- The publisher keeps a local preview. Capturing an entire monitor that also
+  displays CALL necessarily creates a mirror corridor; share a specific
+  window/tab or move the viewer to another monitor to avoid it.
+
 ## Dev
 
 ```sh
