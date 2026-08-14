@@ -248,8 +248,10 @@ function roomView() {
   const audioLabel = audioEnabled ? 'Выключить звук собеседников' : 'Включить звук собеседников';
   const micLabel = participant.isMicrophoneEnabled ? 'Выключить микрофон' : 'Включить микрофон';
   const shareBusy = Boolean(screenShare && !screenShare.local);
+  const canShareScreen = call.canShareScreen();
   const screenLabel = participant.isScreenShareEnabled ? 'Остановить демонстрацию' : (shareBusy ? 'Другой участник показывает экран' : 'Показать экран');
-  const controls = `<div class="controls" aria-label="Управление звонком"><button type="button" id="audio" class="control-button${audioEnabled ? ' active' : ''}" aria-label="${audioLabel}" title="${audioLabel}" aria-pressed="${audioEnabled}">${icon(audioEnabled ? 'audio' : 'audioOff')}</button><button type="button" id="mic" class="control-button${participant.isMicrophoneEnabled ? ' active' : ''}" aria-label="${micLabel}" title="${micLabel}" aria-pressed="${participant.isMicrophoneEnabled}" ${!call.descriptor.capabilities.can_publish_audio || call.pending.mic ? 'disabled' : ''}>${icon(participant.isMicrophoneEnabled ? 'mic' : 'micOff')}</button><button type="button" id="screen" class="control-button${participant.isScreenShareEnabled ? ' active' : ''}" aria-label="${screenLabel}" title="${screenLabel}" aria-pressed="${participant.isScreenShareEnabled}" ${!call.descriptor.capabilities.can_share_screen || call.pending.screen || shareBusy ? 'disabled' : ''}>${icon(participant.isScreenShareEnabled ? 'screenOff' : 'screen')}</button></div>`;
+  const screenControl = canShareScreen ? `<button type="button" id="screen" class="control-button${participant.isScreenShareEnabled ? ' active' : ''}" aria-label="${screenLabel}" title="${screenLabel}" aria-pressed="${participant.isScreenShareEnabled}" ${!call.descriptor.capabilities.can_share_screen || call.pending.screen || shareBusy ? 'disabled' : ''}>${icon(participant.isScreenShareEnabled ? 'screenOff' : 'screen')}</button>` : '';
+  const controls = `<div class="controls" aria-label="Управление звонком"><button type="button" id="audio" class="control-button${audioEnabled ? ' active' : ''}" aria-label="${audioLabel}" title="${audioLabel}" aria-pressed="${audioEnabled}">${icon(audioEnabled ? 'audio' : 'audioOff')}</button><button type="button" id="mic" class="control-button${participant.isMicrophoneEnabled ? ' active' : ''}" aria-label="${micLabel}" title="${micLabel}" aria-pressed="${participant.isMicrophoneEnabled}" ${!call.descriptor.capabilities.can_publish_audio || call.pending.mic ? 'disabled' : ''}>${icon(participant.isMicrophoneEnabled ? 'mic' : 'micOff')}</button>${screenControl}</div>`;
   const roomActions = `<div class="room-actions" aria-label="Действия комнаты"><button type="button" id="room-link" class="control-button" aria-label="Скопировать ссылку на комнату" title="Скопировать ссылку на комнату">${icon('link')}</button><button type="button" id="leave" class="control-button danger" aria-label="Выйти из звонка" title="Выйти из звонка">${icon('leave')}</button></div><div class="room-action-status" role="status" aria-live="polite"></div>`;
   const mediaNotice = call.error ? `<p class="error" role="alert">${esc(call.error)}</p>` : (call.status ? `<p class="success" role="status">${esc(call.status)}</p>` : '');
   const localShareNotice = screenShare?.local ? '<div class="local-share-notice">Предпросмотр демонстрации</div>' : '';
@@ -260,7 +262,8 @@ function roomView() {
   root.querySelector('main').classList.add('call-main');
   root.querySelector('#audio').onclick = async () => call.toggleAudio();
   root.querySelector('#mic').onclick = async () => call.toggleMic();
-  root.querySelector('#screen').onclick = async () => call.toggleScreen();
+  const screenButton = root.querySelector('#screen');
+  if (screenButton) screenButton.onclick = async () => call.toggleScreen();
   root.querySelector('#room-link').onclick = (event) => copyRoomLink(event.currentTarget, root.querySelector('.room-action-status'));
   root.querySelector('#leave').onclick = leaveRoom;
   queueMicrotask(() => call.mountMedia());

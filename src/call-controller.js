@@ -153,7 +153,7 @@ class CallController extends EventTarget {
   }
 
   async toggleScreen() {
-    if (!this.room || !this.descriptor?.capabilities.can_share_screen || this.pending.screen) return;
+    if (!this.room || !this.descriptor?.capabilities.can_share_screen || !this.canShareScreen() || this.pending.screen) return;
     const enabling = !this.room.localParticipant.isScreenShareEnabled;
     this.pending.screen = true;
     this.setStatus('');
@@ -180,6 +180,10 @@ class CallController extends EventTarget {
       this.pending.screen = false;
       this.changed();
     }
+  }
+
+  canShareScreen() {
+    return typeof navigator.mediaDevices?.getDisplayMedia === 'function';
   }
 
   async toggleAudio() {
@@ -325,6 +329,7 @@ class CallController extends EventTarget {
     if (error?.name === 'AbortError') return 'Выбор экрана был отменён или прерван браузером.';
     if (error?.name === 'InvalidStateError') return 'Браузер не разрешил демонстрацию из текущей вкладки. Активируйте окно и повторите.';
     if (error?.name === 'NotReadableError') return 'Выбранный экран недоступен для захвата. Закройте другое приложение захвата и повторите.';
+    if (error?.name === 'DeviceUnsupportedError') return 'Демонстрация экрана на этом устройстве не поддерживается.';
     const detail = error?.name || error?.message;
     return detail ? `Не удалось включить медиа (${String(detail).slice(0, 80)}).` : 'Не удалось изменить состояние медиа. Проверьте разрешения браузера.';
   }
