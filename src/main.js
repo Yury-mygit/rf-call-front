@@ -8,6 +8,7 @@ import { navigate, route } from './router.js';
 const root = document.querySelector('#app');
 let guestSession = null;
 let guestEvents = null;
+let ownerSession = null;
 const esc = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 const icon = (name) => ({
   audio: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9H5Z"/><path d="M17 9a4 4 0 0 1 0 6M19.5 6.5a8 8 0 0 1 0 11"/></svg>',
@@ -217,7 +218,10 @@ function guestView(token) {
 
 async function enterRoom(descriptor, asGuest = false) {
   closeGuestEvents();
-  if (!asGuest) guestSession = null;
+  if (!asGuest) {
+    guestSession = null;
+    ownerSession = { roomId: descriptor.room_id, reconnecting: false };
+  }
   await call.connect(descriptor);
   navigate(`/room/${descriptor.room_id}`);
   emit('shell.navigate', { to: `/call/${descriptor.room_id}` });
@@ -225,6 +229,7 @@ async function enterRoom(descriptor, asGuest = false) {
 
 async function leaveRoom() {
   const returningGuest = guestSession;
+  ownerSession = null;
   await call.leave();
   if (returningGuest) {
     returningGuest.state = 'left';
@@ -234,6 +239,29 @@ async function leaveRoom() {
   } else {
     navigate('/');
   }
+}
+
+async function reconnectOwner() {
+  if (!ownerSession || ownerSession.reconnecting) return;
+  ownerSession.reconnecting = true;
+  const { roomId } = ownerSession;
+  shell('Восстанавливаем звонок', '<section class="panel empty"><p>Соединение прервалось. Повторно подключаемся к комнате…</p></section>', null);
+  for (const delay of [0, 1000, 2500]) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    if (!ownerSession || ownerSession.roomId !== roomId) return;
+    try {
+      const descriptor = await api.ownerJoin(roomId);
+      await call.connect(descriptor);
+      ownerSession.reconnecting = false;
+      navigate(`/room/${roomId}`, { replace: true });
+      return;
+    } catch {
+      // A fresh descriptor is requested for every attempt; media tokens are
+      // intentionally short lived and must not be cached across reconnects.
+    }
+  }
+  ownerSession = null;
+  navigate('/', { replace: true });
 }
 
 function roomView() {
@@ -279,6 +307,10 @@ call.addEventListener('change', () => {
       replace: true,
       state: { guestReturn: true, displayName: guestSession.displayName },
     });
+    return;
+  }
+  if (!call.room && ownerSession) {
+    reconnectOwner();
     return;
   }
   roomView();
